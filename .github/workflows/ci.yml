@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Keep in sync with `rust-version` in Cargo.toml.
+  RUST_TOOLCHAIN: "1.85.1"
+
+jobs:
+  check:
+    name: fmt / clippy / build / test (CPU)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - name: clippy (default features)
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: clippy (all features)
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: build (all features)
+        run: cargo build --locked --all-features --all-targets
+      - name: test (CPU / ndarray)
+        run: cargo test --locked
+      - name: smoke-run launch
+        run: cargo run --locked --release --bin launch -- --config configs/dreamfusion-toy.yaml --train --test trainer.max_steps=10 data.width=16 data.height=16
+
+  vulkan-software:
+    name: test (Vulkan via lavapipe)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Mesa lavapipe (software Vulkan)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers libvulkan1 vulkan-tools
+          vulkaninfo --summary || true
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: test (all features, CubeCL kernels vs CPU reference)
+        run: cargo test --locked --all-features -- --nocapture
