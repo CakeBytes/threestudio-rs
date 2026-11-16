@@ -5,3 +5,4 @@ pub mod geometry;
 pub mod guidance;
 pub mod prompt;
 pub mod renderer;
+pub mod sdxl;

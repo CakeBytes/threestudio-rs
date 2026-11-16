@@ -9,6 +9,7 @@ use crate::models::guidance::{
 };
 use crate::models::prompt::PromptProcessor;
 use crate::models::renderer::NeRFVolumeRenderer;
+use crate::models::sdxl::{expand_home, SdxlNoisePredictor};
 use burn::optim::{AdamConfig, GradientsParams, Optimizer};
 use burn::prelude::*;
 use burn::tensor::backend::AutodiffBackend;
@@ -35,7 +36,10 @@ pub struct DreamFusion<B: AutodiffBackend> {
 }
 
 /// Build the guidance named by `system.guidance_type`.
-pub fn build_guidance<B: Backend>(cfg: &ExperimentConfig) -> anyhow::Result<Box<dyn Guidance<B>>> {
+pub fn build_guidance<B: AutodiffBackend>(
+    cfg: &ExperimentConfig,
+    device: &B::Device,
+) -> anyhow::Result<Box<dyn Guidance<B>>> {
     match cfg.system.guidance_type.as_str() {
         "mock-sds-guidance" => Ok(Box::new(ScoreDistillationGuidance::new(
             MockDenoiser {
@@ -44,6 +48,16 @@ pub fn build_guidance<B: Backend>(cfg: &ExperimentConfig) -> anyhow::Result<Box<
             cfg.system.guidance.clone(),
             cfg.seed,
         ))),
+        "stable-diffusion-xl-guidance" | "pony-diffusion-guidance" => {
+            let g = &cfg.system.guidance;
+            let path = expand_home(&g.pretrained_model_name_or_path);
+            let pred = SdxlNoisePredictor::<B>::from_checkpoint(&path, g, device)?;
+            Ok(Box::new(ScoreDistillationGuidance::new(
+                pred,
+                g.clone(),
+                cfg.seed,
+            )))
+        }
         "stable-diffusion-guidance" => {
             StableDiffusionGuidance::new()?;
             unreachable!()
@@ -65,7 +79,7 @@ impl<B: AutodiffBackend> DreamFusion<B> {
             cfg.system.renderer_type
         );
         B::seed(cfg.seed);
-        let guidance = build_guidance::<B>(&cfg)?;
+        let guidance = build_guidance::<B>(&cfg, &device)?;
         Ok(Self {
             geometry: ImplicitVolume::new(&cfg.system.geometry, &device),
             renderer: NeRFVolumeRenderer::new(cfg.system.renderer.clone()),

@@ -29,6 +29,13 @@ pub trait Guidance<B: Backend> {
 
 /// epsilon-prediction network, i.e. the UNet in `StableDiffusionGuidance`.
 pub trait NoisePredictor<B: Backend> {
+    /// Map a rendered `[b, h, w, 3]` image in `[0, 1]` to the space the
+    /// predictor diffuses in (identity for pixel-space predictors, the VAE
+    /// latent for latent diffusion). Must stay differentiable.
+    fn encode(&self, rgb: Tensor<B, 4>) -> Tensor<B, 4> {
+        rgb
+    }
+
     fn predict_noise(
         &self,
         x_noisy: Tensor<B, 4>,
@@ -109,7 +116,7 @@ impl<B: Backend, P: NoisePredictor<B>> Guidance<B> for ScoreDistillationGuidance
         let ab = self.alphas_cumprod[t];
 
         // forward diffusion + noise prediction happen without gradients
-        let latents = rgb.clone();
+        let latents = self.predictor.encode(rgb);
         let noise = Tensor::<B, 4>::random(latents.dims(), Distribution::Normal(0.0, 1.0), &device);
         let x_noisy = latents.clone().detach().mul_scalar(ab.sqrt())
             + noise.clone().mul_scalar((1.0 - ab).sqrt());
@@ -146,14 +153,15 @@ impl<B: Backend, P: NoisePredictor<B>> Guidance<B> for ScoreDistillationGuidance
     }
 }
 
-/// Placeholder for `stable-diffusion-guidance`. Running SD in Burn needs a UNet,
-/// VAE and CLIP text encoder port plus weight loading; not done yet.
+/// Placeholder for `stable-diffusion-guidance` (SD 1.x / 2.x). SDXL-family
+/// checkpoints (incl. Pony Diffusion) are supported via
+/// `stable-diffusion-xl-guidance` / [`crate::models::sdxl`].
 pub struct StableDiffusionGuidance;
 
 impl StableDiffusionGuidance {
     pub fn new() -> anyhow::Result<Self> {
         anyhow::bail!(
-            "stable-diffusion-guidance is not ported yet; use guidance_type: mock-sds-guidance"
+            "stable-diffusion-guidance (SD 1.x/2.x) is not ported; use stable-diffusion-xl-guidance or mock-sds-guidance"
         )
     }
 }

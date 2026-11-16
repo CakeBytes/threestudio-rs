@@ -2998,8 +2998,12 @@ dependencies = [
  "anyhow",
  "burn",
  "clap",
+ "half",
+ "memmap2",
  "rand",
+ "regex",
  "serde",
+ "serde_json",
  "serde_yaml",
  "threestudio-kernels",
 ]
