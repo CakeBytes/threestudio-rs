@@ -1,0 +1,8 @@
+threestudio-rs
+Copyright 2026 CakeBytes
+
+This project is a Rust port of threestudio
+(https://github.com/threestudio-project/threestudio),
+Copyright 2023 threestudio contributors, licensed under the Apache License 2.0.
+Its architecture, configuration schema, camera conventions, density-bias and
+score-distillation formulations are derived from threestudio.

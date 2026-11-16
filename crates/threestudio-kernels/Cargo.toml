@@ -1,0 +1,17 @@
+[package]
+name = "threestudio-kernels"
+description = "CubeCL kernels (and CPU reference implementations) for threestudio-rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# Enables the CubeCL kernels on the wgpu runtime (Vulkan/SPIR-V on Linux).
+gpu = ["dep:cubecl", "dep:wgpu"]
+
+[dependencies]
+cubecl = { workspace = true, optional = true, features = ["std", "wgpu", "wgpu-spirv"] }
+wgpu = { version = "25", optional = true }
