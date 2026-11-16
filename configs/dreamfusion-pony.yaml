@@ -1,0 +1,77 @@
+# DreamFusion with score distillation from Pony Diffusion V6 XL (an SDXL fine-tune).
+# Download the checkpoint first (Civitai model 257749, version 290640, ~6.9 GB):
+#   ~/.cache/threestudio-rs/pony/ponyDiffusionV6XL_v6.safetensors
+#   sha256 67ab2fd8ec439a89b3fedb15cc65f54336af163c7eb5e4f2acc98f090a29b0b3
+# The full SDXL UNet in f32 needs ~11 GB of (V)RAM; set low_memory: true to stream
+# UNet blocks from disk instead (much slower, ~2 GB peak working set).
+name: "dreamfusion-pony"
+tag: "sdxl-sds"
+seed: 0
+exp_root_dir: "outputs"
+
+data_type: "random-camera-datamodule"
+data:
+  width: 64
+  height: 64
+  batch_size: 1
+  elevation_range: [-10, 80]
+  azimuth_range: [-180, 180]
+  camera_distance_range: [1.5, 2.0]
+  fovy_range: [40, 70]
+  eval_camera_distance: 2.0
+  eval_fovy_deg: 70.0
+
+system_type: "dreamfusion-system"
+system:
+  geometry_type: "implicit-volume"
+  geometry:
+    radius: 1.0
+    n_frequencies: 8
+    n_neurons: 64
+    n_hidden_layers: 2
+    density_bias: "blob_magic3d"
+    density_blob_scale: 10.0
+    density_blob_std: 0.5
+
+  renderer_type: "nerf-volume-renderer"
+  renderer:
+    num_samples_per_ray: 64
+    randomized: true
+    near: 0.5
+    far: 3.5
+
+  background:
+    color: [1.0, 1.0, 1.0]
+
+  prompt_processor:
+    prompt: "a cute corgi plush toy, full body, simple white background"
+    # Pony Diffusion quality tags
+    prompt_prefix: "score_9, score_8_up, score_7_up, score_6_up, "
+    negative_prompt_prefix: "score_4, score_5, score_6, "
+    negative_prompt: "blurry, lowres, bad anatomy"
+    view_dependent_prompting: true
+
+  guidance_type: "stable-diffusion-xl-guidance"
+  guidance:
+    pretrained_model_name_or_path: "~/.cache/threestudio-rs/pony/ponyDiffusionV6XL_v6.safetensors"
+    guidance_scale: 100.0
+    resolution: 512
+    latent_encoder: "vae"   # or "linear" (approximate, no VAE)
+    low_memory: false
+    min_step_percent: 0.02
+    max_step_percent: 0.98
+    num_train_timesteps: 1000
+
+  loss:
+    lambda_sds: 1.0
+    lambda_sparsity: 0.0
+
+  optimizer:
+    name: Adam
+    lr: 0.01
+    betas: [0.9, 0.99]
+    eps: 1.0e-15
+
+trainer:
+  max_steps: 10000
+  log_every_n_steps: 10

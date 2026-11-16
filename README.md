@@ -5,10 +5,11 @@ A Rust port scaffold of [threestudio](https://github.com/threestudio-project/thr
 — built on [Burn](https://burn.dev) `0.18` and [CubeCL](https://github.com/tracel-ai/cubecl) `0.6`,
 with a CPU (`ndarray`) backend and a GPU backend on **wgpu → Vulkan (SPIR-V)**.
 
-> **Status: first milestone.** The full pipeline (config → random cameras → implicit volume →
-> volume rendering → score-distillation loss → Adam) runs end to end and trains, but the
-> diffusion prior is a mathematically exact *mock* — there is no Stable Diffusion in Rust yet.
-> See [What is ported](#what-is-ported-vs-stubbed).
+> **Status.** The full pipeline (config → random cameras → implicit volume → volume rendering →
+> score-distillation loss → Adam) runs end to end. Guidance can be a cheap exact *mock* or a real
+> **SDXL** prior implemented in Burn (UNet, CLIP ViT-L + OpenCLIP ViT-bigG, VAE encoder) that loads
+> single-file checkpoints such as **Pony Diffusion V6 XL** directly.
+> See [What is ported](#what-is-ported-vs-stubbed) and [SDXL / Pony guidance](#sdxl--pony-diffusion-guidance).
 
 ## Quick start
 
@@ -28,6 +29,54 @@ cargo run --release --bin launch -- --config configs/dreamfusion-toy.yaml --trai
 ```
 
 `--test` writes an 8-view evaluation orbit as PPM images to `outputs/<name>/`.
+
+## SDXL / Pony Diffusion guidance
+
+`guidance_type: stable-diffusion-xl-guidance` (alias `pony-diffusion-guidance`) runs score
+distillation with a real SDXL model, written from scratch in Burn (`crates/threestudio/src/models/sdxl`):
+
+| component | checkpoint prefix | notes |
+|-----------|-------------------|-------|
+| UNet (320/640/1280 ch, transformer depth 0/2/10, mid 10, 64-d heads, cross-attn 2048, `text_time` added cond 2816) | `model.diffusion_model.*` | LDM key names; block plan in `unet.rs` |
+| CLIP ViT-L/14 text encoder (penultimate layer, quick-GELU) | `conditioner.embedders.0.transformer.*` | HF layout |
+| OpenCLIP ViT-bigG/14 text encoder (penultimate layer + pooled `text_projection`) | `conditioner.embedders.1.model.*` | fused `in_proj` split into q/k/v |
+| VAE encoder + `quant_conv`, latent scale 0.13025 | `first_stage_model.*` | differentiable; `latent_encoder: linear` is a documented approximate fallback |
+| CLIP BPE tokenizer | `assets/clip/merges.txt` | byte-level BPE port of CLIP's `simple_tokenizer`; vocab verified identical to `openai/clip-vit-large-patch14` |
+
+Weights are read from the `.safetensors` file through a memory map (F16/BF16/F32 → f32), with no
+conversion step. Classifier-free guidance batches the negative and positive prompts; an empty negative
+prompt uses zero embeddings (SDXL's `force_zeros_for_empty_prompt`). Pony's quality tags go in
+`prompt_processor.prompt_prefix` / `negative_prompt_prefix`. See `configs/dreamfusion-pony.yaml`.
+
+Get the checkpoint (Civitai model 257749, version 290640, file `ponyDiffusionV6XL_v6.safetensors`,
+SHA256 `67ab2fd8ec439a89b3fedb15cc65f54336af163c7eb5e4f2acc98f090a29b0b3`):
+
+```bash
+mkdir -p ~/.cache/threestudio-rs/pony
+curl -L -H "Authorization: Bearer $CIVITAI_API_KEY" \
+  -o ~/.cache/threestudio-rs/pony/ponyDiffusionV6XL_v6.safetensors \
+  "https://civitai.com/api/download/models/290640?type=Model&format=SafeTensor"
+```
+
+Sanity probe: one real denoising step, UNet streamed block by block from disk:
+
+```bash
+cargo run --release --bin sdxl-probe -- --resolution 256
+```
+
+Measured on an 8-vCPU CPU-only box (Burn ndarray, f32, 256 px → 32×32 latent, t = 500):
+
+```
+VAE encode 256x256 -> [1, 4, 32, 32] in 4.8s (latent mean 0.132, std 1.490)
+UNet (CFG batch of 2, t=500, streamed from disk) incl. text encoding: 62.0s
+cos(eps_cond, true noise)   = 0.9878
+x0 MSE: predicted 0.0630 vs naive (eps=0) 2.6080
+```
+
+Memory: the UNet is ~2.6 B parameters, i.e. ~10.3 GB in f32 (all weights resident, `low_memory: false`).
+`low_memory: true` streams UNet blocks and OpenCLIP layers from the memory-mapped file (~1.7 GB peak for
+the largest block) at the cost of re-reading weights on every step. Practical training at 512–1024 px
+needs a GPU; f16 execution on the wgpu backend is not wired up yet.
 
 Toolchain: Rust **1.85** (MSRV, pinned in CI). Builds use the committed `Cargo.lock`
 (`--locked`); it pins `bytemuck` to 1.23.x because newer releases enable AVX-512 types that
@@ -63,6 +112,9 @@ are only stable from Rust 1.89.
 - **Renderer**: stratified (jittered) ray marching, alpha compositing via an exclusive
   cumulative sum, opacity / depth / weights outputs, background compositing. Fully
   differentiable on any Burn autodiff backend.
+- **SDXL guidance**: see [above](#sdxl--pony-diffusion-guidance); key-mapping coverage is tested
+  against the real Pony checkpoint (2373 of 2515 tensors used; the rest are the VAE decoder,
+  `post_quant_conv`, `position_ids`, `logit_scale`).
 - **Guidance**: the SDS update of `StableDiffusionGuidance` — SD `scaled_linear` noise
   schedule, timestep sampling in `[min_step_percent, max_step_percent]`, `w(t) = 1 - ᾱ_t`,
   optional grad clipping, and the reparameterised loss `0.5·‖x − sg(x − grad)‖²`.
@@ -75,11 +127,11 @@ are only stable from Rust 1.89.
 
 **Stubbed / not yet ported**
 
-- **Diffusion prior**: `MockDenoiser` is the exact ε-predictor for a data distribution
-  concentrated on one colour, so SDS provably pulls renders toward that colour. A real
-  Stable Diffusion / DeepFloyd guidance needs a UNet + VAE + CLIP text encoder in Burn and
-  weight loading; `stable-diffusion-guidance` currently returns an error.
-- **Text encoder**: `PromptEmbedding.text_embeddings` is always `None`.
+- **Diffusion priors other than SDXL**: SD 1.x/2.x (`stable-diffusion-guidance`), DeepFloyd IF,
+  Zero-1-to-3 and VSD/LoRA guidance (ProlificDreamer) are not ported. `MockDenoiser` remains as a
+  cheap exact ε-predictor for tests.
+- **SDXL performance**: f32 only, no flash attention, no f16 on GPU yet; CPU is far too slow for
+  real training (one streamed UNet step at 32×32 latents takes about a minute).
 - **Hash-grid encoding** (tiny-cuda-nn), **occupancy-grid acceleration** (nerfacc),
   normals/shading, mesh geometries (DMTet), other systems (Magic3D, ProlificDreamer, Zero-1-to-3),
   checkpointing, and the Lightning-style trainer/callback machinery.
