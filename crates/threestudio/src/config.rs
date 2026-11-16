@@ -164,6 +164,12 @@ impl Default for BackgroundConfig {
 pub struct PromptProcessorConfig {
     pub prompt: String,
     pub negative_prompt: String,
+    /// Prepended to every prompt, e.g. Pony's `"score_9, score_8_up, score_7_up, "`.
+    pub prompt_prefix: String,
+    /// Prepended to the negative prompt, e.g. `"score_4, score_5, score_6, "`.
+    pub negative_prompt_prefix: String,
+    /// Append threestudio-style view suffixes ("front view", ...).
+    pub view_dependent_prompting: bool,
 }
 
 impl Default for PromptProcessorConfig {
@@ -171,6 +177,9 @@ impl Default for PromptProcessorConfig {
         Self {
             prompt: "a red ball".into(),
             negative_prompt: String::new(),
+            prompt_prefix: String::new(),
+            negative_prompt_prefix: String::new(),
+            view_dependent_prompting: true,
         }
     }
 }
@@ -184,6 +193,16 @@ pub struct GuidanceConfig {
     pub grad_clip: Option<f32>,
     /// Target colour used by the mock guidance (stands in for a diffusion prior).
     pub mock_target_color: [f32; 3],
+    /// Single-file SDXL checkpoint (`stable-diffusion-xl-guidance`), `~/` allowed.
+    pub pretrained_model_name_or_path: String,
+    /// Classifier-free guidance scale (threestudio uses 100 for SDS).
+    pub guidance_scale: f32,
+    /// Pixel resolution fed to the VAE (latents are `resolution / 8`).
+    pub resolution: usize,
+    /// `vae` (real SDXL VAE encoder) or `linear` (cheap approximate fallback).
+    pub latent_encoder: String,
+    /// Stream UNet blocks / OpenCLIP layers from disk instead of keeping them resident.
+    pub low_memory: bool,
 }
 
 impl Default for GuidanceConfig {
@@ -194,6 +213,12 @@ impl Default for GuidanceConfig {
             num_train_timesteps: 1000,
             grad_clip: None,
             mock_target_color: [1.0, 0.1, 0.1],
+            pretrained_model_name_or_path:
+                "~/.cache/threestudio-rs/pony/ponyDiffusionV6XL_v6.safetensors".into(),
+            guidance_scale: 100.0,
+            resolution: 512,
+            latent_encoder: "vae".into(),
+            low_memory: false,
         }
     }
 }
