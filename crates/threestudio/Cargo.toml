@@ -1,0 +1,27 @@
+[package]
+name = "threestudio"
+description = "Rust port scaffold of threestudio (3D content generation) on Burn + CubeCL"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# GPU backend: Burn's wgpu backend compiled to SPIR-V for Vulkan, plus the
+# custom CubeCL kernels in `threestudio-kernels`.
+vulkan = ["burn/vulkan", "threestudio-kernels/gpu"]
+
+[dependencies]
+burn = { workspace = true, features = ["std", "ndarray", "autodiff"] }
+threestudio-kernels = { path = "../threestudio-kernels" }
+serde.workspace = true
+serde_yaml.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+rand.workspace = true
+
+[[bin]]
+name = "launch"
+path = "src/bin/launch.rs"
